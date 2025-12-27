@@ -1,3 +1,20 @@
+# jupyter notebooks
+*.ipynb
+
+# IDEA project
+.idea
+
+# data
+*.fit
+*.fits
+
+# reduced stuff
+*.png
+*.xcf
+
+# the data dir itself
+data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

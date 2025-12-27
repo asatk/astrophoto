@@ -1,0 +1,16 @@
+{
+	"root": "/home/asatk/code/astrophoto/data/RUCO-2025.10.30/Calib/",
+	"fpattern": "*.fit",
+	"bias_fout": "bias.fits",
+	"bias_combine": 1,
+	"dark_fout": "dark.fits",
+	"dark_texp": 0.0,
+	"dark_combine": 1,
+	"dark_is_current": 0,
+	"flat_fpattern": "flats/*.fit",
+	"flat_band": "Red",
+	"flat_bias": "bias.fit",
+	"flat_dark": "dark.fit",
+	"flat_combine": 1,
+	"flat_fout": "flat_R.fit"
+}
