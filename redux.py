@@ -4,16 +4,9 @@ from astrophoto.io import println, prompt, init_parser, init_defaults, store_def
 from astrophoto.bias import calib_bias
 from astrophoto.dark import calib_dark
 from astrophoto.flat import calib_flat
+from astrophoto.io.reduxio import saveandquit
 
-if __name__ == "__main__":
-
-    parser = init_parser()
-    args = vars(parser.parse_args())
-
-    proc = args["process"]
-    set_quiet(args["quiet"])
-
-    procedures = [
+procedures = [
         "bias",
         "dark",
         "flat",
@@ -21,8 +14,19 @@ if __name__ == "__main__":
         "stack"
     ]
 
-    cfg_infile = input("Config file (path)? ")
+if __name__ == "__main__":
+
+    parser = init_parser()
+    args = vars(parser.parse_args())
+
+    set_quiet(args["quiet"])
+
+    cfg_infile = args["config"]
     init_defaults(cfg_infile)
+
+    proc = args["process"]
+    if proc is None:
+        proc = input(f"Data reduction process ({procedures}): ")
 
     println()
 
@@ -43,5 +47,4 @@ if __name__ == "__main__":
 
     println()
 
-    cfg_outfile = input("Save responses to config file (path)? ")
-    store_defaults(cfg_outfile)
+    saveandquit(0)

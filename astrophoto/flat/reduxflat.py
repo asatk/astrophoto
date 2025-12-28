@@ -4,6 +4,7 @@ import numpy as np
 from astropy.io import fits
 
 from astrophoto.io import printf, println, prompt, COMBINE_MEDIAN, prompt_choices, COMBINE_MEAN
+from astrophoto.io.reduxio import saveandquit
 from astrophoto.viz import plot_frame
 
 
@@ -28,7 +29,7 @@ def calib_flat(root_dir):
 
     if len(data_list) == 0:
         printf("No files loaded.")
-        exit(20)
+        saveandquit(20)
 
     flats = np.array(data_list)
     texps = np.array(texp_list)
@@ -64,7 +65,7 @@ def calib_flat(root_dir):
         flat = np.mean(flats, axis=0)
     else:
         printf("Invalid frame combination mode")
-        exit(10)
+        saveandquit(10)
 
     # normalize combined flat
     flat /= np.mean(flat)

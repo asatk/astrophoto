@@ -32,14 +32,16 @@ def init_parser():
         formatter_class=ap.HelpFormatter
     )
 
+    parser.add_argument("process", nargs="?", default=None, type=str)
+    parser.add_argument("-c", "--config", type=str, default=None)
     parser.add_argument("-q", "--quiet", action="store_const", const=True, default=False)
-    parser.add_argument("process", nargs="?", default="data", type=str)
+
+
 
     return parser
 
 
 def init_defaults(fname: str=None):
-    global defaults
     if fname is not None and fname != "":
         with open(fname, "r") as f:
             json_data = json.load(f)
@@ -51,6 +53,12 @@ def store_defaults(fname):
             json.dump(defaults, f, indent="\t")
     else:
         printf("Responses not saved.")
+
+def update_default(key: str, val: str):
+    defaults[key] = val
+
+def get_default(key: str):
+    return defaults.get(key)
 
 def set_quiet(q):
     global is_quiet
@@ -86,3 +94,8 @@ def prompt_choices(msg: str, choices: str, key: str, cast_fn=str):
         defaults[key] = resp
 
     return resp
+
+def saveandquit(code: int):
+    cfg_outfile = input("Save responses to config file (path)? ")
+    store_defaults(cfg_outfile)
+    exit(code)

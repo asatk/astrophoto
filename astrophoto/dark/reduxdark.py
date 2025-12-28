@@ -4,6 +4,7 @@ import numpy as np
 from astropy.io import fits
 
 from astrophoto.io import printf, println, prompt, COMBINE_MEDIAN, prompt_choices, COMBINE_MEAN
+from astrophoto.io.reduxio import saveandquit
 from astrophoto.viz import plot_frame
 
 
@@ -27,7 +28,7 @@ def calib_dark(root_dir):
 
     if len(data_list) == 0:
         printf("No files loaded.")
-        exit(20)
+        saveandquit(20)
 
     darks = np.array(data_list)
     texps = np.array(texp_list)
@@ -55,7 +56,7 @@ def calib_dark(root_dir):
         dark = np.mean(darks, axis=0)
     else:
         printf("Invalid frame combination mode")
-        exit(10)
+        saveandquit(10)
 
     plot_frame(dark)
 

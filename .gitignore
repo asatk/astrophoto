@@ -8,6 +8,9 @@
 *.fit
 *.fits
 
+# config files
+*.json
+
 # reduced stuff
 *.png
 *.xcf
