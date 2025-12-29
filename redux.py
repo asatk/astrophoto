@@ -4,7 +4,7 @@ from astrophoto.io import println, prompt, init_parser, init_defaults, store_def
 from astrophoto.bias import calib_bias
 from astrophoto.dark import calib_dark
 from astrophoto.flat import calib_flat
-from astrophoto.io.reduxio import saveandquit
+from astrophoto.io.reduxio import save_and_quit
 
 procedures = [
         "bias",
@@ -47,4 +47,4 @@ if __name__ == "__main__":
 
     println()
 
-    saveandquit(0)
+    save_and_quit(0)

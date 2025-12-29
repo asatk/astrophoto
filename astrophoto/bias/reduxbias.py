@@ -3,7 +3,7 @@ import glob
 import numpy as np
 from astropy.io import fits
 
-from astrophoto.io.reduxio import printf, println, prompt, COMBINE_MEDIAN, prompt_choices, COMBINE_MEAN, saveandquit
+from astrophoto.io.reduxio import printf, println, prompt, COMBINE_MEDIAN, prompt_choices, COMBINE_MEAN, save_and_quit
 from astrophoto.viz.plot import plot_frame
 
 
@@ -18,7 +18,7 @@ def calib_bias(root_dir):
 
     if len(data_list) == 0:
         printf("No files loaded.")
-        saveandquit(20)
+        save_and_quit(20)
 
     biases = np.array(data_list)
 
@@ -35,7 +35,7 @@ def calib_bias(root_dir):
         bias = np.mean(biases, axis=0)
     else:
         printf("Invalid frame combination mode")
-        saveandquit(10)
+        save_and_quit(10)
 
     plot_frame(bias)
 

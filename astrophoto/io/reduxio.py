@@ -54,7 +54,12 @@ def store_defaults(fname):
     else:
         printf("Responses not saved.")
 
-def update_default(key: str, val: str):
+def save_and_quit(code: int):
+    cfg_outfile = input("Save responses to config file (path)? ")
+    store_defaults(cfg_outfile)
+    exit(code)
+
+def update_default(key: str, val):
     defaults[key] = val
 
 def get_default(key: str):
@@ -73,29 +78,42 @@ def println():
 
 def prompt(msg: str, key: str, cast_fn=str):
     val = defaults.get(key, "")
+    if is_quiet:
+        return val
+
     resp = input(f"{msg} [{val}] ")
 
-    if resp == "":
-        resp = cast_fn(val)
-    else:
-        resp = cast_fn(resp.strip())
-        defaults[key] = resp
+    try:
+
+        if resp == "":
+            resp = cast_fn(val)
+        else:
+            resp = cast_fn(resp.strip())
+            defaults[key] = resp
+
+    except ValueError:
+        print("Bad input - quitting.")
+        save_and_quit(40)
 
     return resp
 
 def prompt_choices(msg: str, choices: str, key: str, cast_fn=str):
     val = defaults.get(key, "")
+    if is_quiet:
+        return val
+
     resp = input(f"{msg} [{val}]\n{choices}\n")
 
-    if resp == "":
-        resp = cast_fn(val)
-    else:
-        resp = cast_fn(resp.strip())
-        defaults[key] = resp
+    try:
+        if resp == "":
+            resp = cast_fn(val)
+        else:
+            resp = cast_fn(resp.strip())
+            defaults[key] = resp
+    except ValueError:
+        print("Bad input - quitting.")
+        save_and_quit(40)
 
     return resp
 
-def saveandquit(code: int):
-    cfg_outfile = input("Save responses to config file (path)? ")
-    store_defaults(cfg_outfile)
-    exit(code)
+

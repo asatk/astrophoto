@@ -1,4 +1,5 @@
-import astroalign
+import astroalign as aa
+import skimage.transform
 from astropy.io import ascii, fits
 from astropy.table import Table
 from astropy.stats import sigma_clipped_stats, SigmaClip
@@ -15,7 +16,7 @@ from photutils.psf import PSFPhotometry, CircularGaussianPRF
 from scipy.ndimage import shift
 
 from astrophoto.io import prompt, prompt_choices, printf, COMBINE_MEDIAN, COMBINE_MEAN, println
-from astrophoto.io.reduxio import update_default, get_default, saveandquit
+from astrophoto.io.reduxio import update_default, get_default, save_and_quit
 from astrophoto.viz import plot_frame
 
 # shift and scale data WITHOUT combining -- frames are returned in the same order but aligned
@@ -98,7 +99,7 @@ def calib_image(root_dir):
 
     if len(data_list) == 0:
         printf("No files loaded.")
-        saveandquit(20)
+        save_and_quit(20)
 
     imgs = np.array(data_list)
     texps = np.array(texp_list)
@@ -153,16 +154,19 @@ def calib_image(root_dir):
     thresh_nsigma = get_default("thresh_nsigma")
     fwhm = get_default("fwhm")
     roundlim = get_default("roundlim")
+    sharplo = get_default("sharplo")
 
     final_frames = []
     ref_frame = None
 
-    for img in imgs:
+    for i, img in enumerate(imgs):
+
+        printf(f"Aligning frame [{i+1}/{len(imgs)}]: {file_list[i]}")
 
         # subtract any large-scale background gradients to make source extraction easier
 
         bkg = Background2D(img, bkg_size, filter_size=(3, 3),
-                                       sigma_clip=sigma_clip, bkg_estimator=bkg_estimator)
+                           sigma_clip=sigma_clip, bkg_estimator=bkg_estimator)
 
         # background-subtracted image
         img_bsub = img - bkg.background
@@ -175,14 +179,16 @@ def calib_image(root_dir):
         while keep_searching:
 
             # initialize instance of star finder object
-            finder = DAOStarFinder(threshold=thresh_nsigma * bstd, fwhm=fwhm, roundlo=-roundlim, roundhi=roundlim)
+            finder = DAOStarFinder(threshold=thresh_nsigma * bstd, fwhm=fwhm,
+                                   roundlo=-roundlim, roundhi=roundlim,
+                                   sharplo=sharplo)
 
             # identify sources in image
             srcs = finder.find_stars(img_bsub)
 
             if srcs is not None and len(srcs) >= 3:
 
-                printf(f"{len(srcs)} source(s) identified.")
+                printf(f"{len(srcs)} sources identified.")
 
                 # plot each identified source as small circle
                 xcen = srcs["xcentroid"]
@@ -196,17 +202,13 @@ def calib_image(root_dir):
             else:
                 printf("Insufficient number of sources (< 3) found with the provided finder parameters.")
 
-            search_option_str = input(
-                """Verdict on current frame's source extraction [0]:
-                [0] Continue to next frame
-                [1] Exclude current frame
-                [2] Refine source extraction
-                """)
-            search_option_str = search_option_str.strip()
-            if search_option_str == "":
-                search_option = 1
-            else:
-                search_option = int(search_option_str)
+            search_option = prompt_choices(
+                "Verdict on current frame's source extraction",
+                """
+                (0) Continue to next frame
+                (1) Exclude current frame
+                (2) Refine source extraction
+                """, "src_ext_decision", int)
 
             if search_option == 0:
 
@@ -215,8 +217,9 @@ def calib_image(root_dir):
                     ref_frame = img
                 # align subsequent frames to reference frames
                 else:
-                    img, _ = astroalign.register(img, ref_frame)
+                    img, _ = aa.register(img, ref_frame)
 
+                printf("Aligned frame included in final data cube.")
                 final_frames.append(img)
                 keep_searching = False
 
@@ -230,7 +233,9 @@ def calib_image(root_dir):
                                        "thresh_nsigma", float)
                 fwhm = prompt("FWHM of sources (pixels, float): ", "fwhm", float)
                 roundlim = abs(
-                    prompt("Upper bound on absolute roundness for sources ([0.0..1.0]): ", "roundlim", float))
+                    prompt("Upper bound on absolute roundness for sources (float): ", "roundlim", float))
+                sharplo = abs(
+                    prompt("Lower bound on sharpness for sources (float): ", "sharplo", float))
 
                 update_default("thresh_nsigma", thresh_nsigma)
                 update_default("fwhm", fwhm)
@@ -238,7 +243,7 @@ def calib_image(root_dir):
 
     if len(final_frames) == 0:
         printf("No frames selected to combine.")
-        saveandquit(30)
+        save_and_quit(30)
 
     printf(f"Combining {len(final_frames)} frames.")
 
@@ -247,7 +252,7 @@ def calib_image(root_dir):
         """
         (1) Median
         (2) Mean
-        """, "flat_combine", int)
+        """, "calib_combine", int)
 
     if combine_mode == COMBINE_MEDIAN:
         img = np.median(final_frames, axis=0)
@@ -255,17 +260,16 @@ def calib_image(root_dir):
         img = np.mean(final_frames, axis=0)
     else:
         printf("Invalid frame combination mode")
-        saveandquit(10)
+        save_and_quit(10)
 
     plot_frame(img, sigma=5.0)
     plt.show()
 
-    out_fname = prompt(f"Output file for combined {band} image (path)?", "fout")
+    out_fname = prompt(f"Output file for combined {band} image (path)?", "calib_fout")
     if out_fname != "":
         out_file = root_dir + "/" + out_fname
         fits.writeto(out_file, img, overwrite=True)
-
-    printf(f"Combined {band} image saved.")
+        printf(f"Combined {band} image saved.")
 
     return img
 
@@ -282,125 +286,210 @@ def stack_image(root_dir):
         printf("No files loaded.")
         exit(20)
 
-    # imgs = np.array(data_list)
     imgs = data_list
 
-    centroids_in_fname = prompt("Use centroids file (path)? ", "stack_centroids_in")
-    if centroids_in_fname != "":
-        centroids_in_file = root_dir + "/" + centroids_in_fname
-        centroids_table = ascii.read(centroids_in_file, guess="csv")
+    println()
+    printf("Identifying sources for frame alignment.")
 
-        # read shift data for coadd
-        centroids_table["path"] = [os.path.abspath(f) for f in centroids_table["file"]]
-        ind_files = [list(centroids_table["path"]).index(os.path.abspath(f))
-                     for f in file_list
-                     if os.path.abspath(f) in centroids_table["path"]]
-        centroids_table = centroids_table[ind_files]
+    # background subtraction
+    sclip_sigma = 3.0
+    sigma_clip = SigmaClip(sigma=sclip_sigma, maxiters=10)
+    bkg_estimator = SExtractorBackground(sigma_clip=sigma_clip)
 
-    else:
+    bkg_size = int(np.sqrt(np.prod(imgs[0].shape)) / 32)
+    update_default("bkg_size", bkg_size)
 
-        println()
-        printf("Subtract sky background and fit 2D Gaussian PSF to a star common to all frames.")
-        centroids = []
-        bkgds = []
-        scales = []
+    # finder parameters
+    bkg_size = get_default("bkg_size")
+    thresh_nsigma = get_default("thresh_nsigma")
+    fwhm = get_default("fwhm")
+    roundlim = get_default("roundlim")
+    sharplo = get_default("sharplo")
 
-        bkg_size = prompt("Bkg mesh size (pixel) (larger than star; small enough for variations): ", "mesh_size", int)
-        threshold = prompt("PSF threshold (count): ", "threshold", float)
+    final_frames = []
+    ref_frame = None
 
-        sclip = SigmaClip(sigma=3.0, maxiters=10)
-        bkg_estimator = SExtractorBackground()
-        psf_model = CircularGaussianPRF()
-        fit_shape = (5,5)
-        finder = DAOStarFinder(threshold, 10.0, roundlo=0.3)
+    i = 0
+    while i < len(imgs):
 
-        plt.ion()
+        img = imgs[i].copy()
 
-        for img in imgs:
+        printf(f"Aligning frame [{i + 1}/{len(imgs)}]: {file_list[i]}")
 
-            img_ = img.copy()
+        # subtract any large-scale background gradients to make source extraction easier
 
-            # Calculate 2D background (correct for gradients possibly present)
-            bkg = Background2D(img_, (bkg_size, bkg_size), filter_size=(3, 3),
-                               sigma_clip=sclip, bkg_estimator=bkg_estimator)
-            plot_frame(bkg.background, title="background pattern")
+        bkg = Background2D(img, (bkg_size, bkg_size), filter_size=(3, 3),
+                           sigma_clip=sigma_clip, bkg_estimator=bkg_estimator)
 
-            img_ -= bkg.background
+        # background-subtracted image
+        img_bsub = img - bkg.background
 
-            ax_ = plot_frame(img_, title="background subtracted frame")
+        plot_frame(bkg.background, "background pattern")
+        plot_frame(img_bsub, "background-subtracted frame")
+        plt.show()
 
-            plt.waitforbuttonpress()
+        background_option = prompt_choices(
+            "Verdict on background estimate",
+            """
+            (0) Continue to alignment; background pattern sufficient
+            (1) Re-estimate background pattern
+            """, "background_option", int)
 
-            phot = psf_phot(img_)
+        if background_option == 1:
+            bkg_size = prompt(f"Background mesh size (img shape: {img.shape})", "mesh_size", int)
+            continue
+        elif background_option != 0:
+            printf("Invalid selection")
+            save_and_quit(40)
 
-            res = psf_phot.finder_results
+        # estimate background RMS for threshold val
+        _, _, bstd = sigma_clipped_stats(img_bsub, sigma=sclip_sigma)
 
-            printf(f"Plotting identified sources ({len(res)}).")
+        while True:
 
-            for src in res:
-                circle = Circle((src["xcentroid"], src["ycentroid"]), 5*aperture,
-                                edgecolor="red", facecolor="none", linewidth=2, alpha=0.5)
-                ax_.add_patch(circle)
+            # initialize instance of star finder object
+            finder = DAOStarFinder(threshold=thresh_nsigma * bstd, fwhm=fwhm,
+                                   roundlo=-roundlim, roundhi=roundlim,
+                                   sharplo=sharplo)
 
+            # identify sources in image
+            srcs = finder.find_stars(img_bsub)
 
-            plt.show()
+            if srcs is not None and len(srcs) >= 3:
 
-            # xi = float(input("Star x (pixel): "))
-            # yi = float(input("Star y (pixel): "))
-            # x, y = centroid_sources(img_, xi, yi, box_size=101,
-            #                         centroid_func=centroid_2dg)
-            # printf(f"Star centroid: {x}, {y}")
-            # centroids.append((x[0], y[0]))
+                printf(f"{len(srcs)} sources identified.")
 
-            # aperture = CircularAperture([[x], [y]], r=fwhm)
+                # plot each identified source as small circle
+                xcen = srcs["xcentroid"]
+                ycen = srcs["ycentroid"]
+                cens = np.array([xcen, ycen]).T
 
-            input("Refine source extraction? [press any key to refine]")
+                ax = plot_frame(img_bsub, sigma=5.0)
+                CircularAperture(cens, r=50.0).plot(ax=ax, color="red")
+                plt.show()
 
-            plt.close()
+            else:
+                printf("Insufficient number of sources (< 3) found with the provided finder parameters.")
 
-        plt.ioff()
+            search_option = prompt_choices(
+                "Verdict on current frame's source extraction",
+                """
+                (0) Continue to next frame
+                (1) Exclude current frame
+                (2) Refine source extraction
+                """, "src_ext_decision", int)
 
-        centroids = np.array(centroids)
-        bkgds = np.array(bkgds)
-        centroids_table = Table({
-            "file": file_list,
-            "xsh": centroids[:, 0],
-            "ysh": centroids[:, 1],
-            "sky": bkgds,
-            "scale": scales,
-        })
+            if search_option == 0 and srcs is not None and len(srcs) >= 3:
 
-        centroids_out_fname = prompt("Save centroids to file (path)? ", "centroids_out")
-        if centroids_out_fname != "":
-            centroids_out_file = root_dir + "/" + centroids_out_fname
-            ascii.write(centroids_table, centroids_out_file, format="csv")
+                # set the reference frame
+                if len(final_frames) == 0:
+                    ref_frame = img_bsub
+                    cens_ref = np.array([srcs["xcentroid"], srcs["ycentroid"]]).T
+                    flux_ref = np.array(srcs["flux"])
 
-    # imgs_align = coadd(imgs, centroids_table["xsh"], centroids_table["ysh"],
-    #                    centroids_table["sky"], centroids_table["scale"])
+                    printf("Flux scaling: 1.0 (reference frame)")
+
+                # align subsequent frames to reference frames
+                else:
+
+                    cens_bsub = np.array([srcs["xcentroid"], srcs["ycentroid"]]).T
+                    flux_bsub = np.array(srcs["flux"])
+
+                    xform, _ = aa.find_transform(cens_bsub, cens_ref, max_control_points=100)
+                    cens_xform = skimage.transform.matrix_transform(cens_bsub, xform)
+
+                    # half-pixel uncertainty should be good enough to confirm that two pairs of coordinates
+                    # refer to the same soure
+                    unc_px = 0.5
+                    cens_xmatch = np.abs(np.subtract.outer(cens_xform[:,0], cens_ref[:,0])) < unc_px
+                    cens_ymatch = np.abs(np.subtract.outer(cens_xform[:,1], cens_ref[:,1])) < unc_px
+                    cens_match = cens_xmatch & cens_ymatch
+                    nmatches = np.sum(cens_match)
+
+                    if nmatches < 1:
+                        printf("No matches between transformed frame and reference frame.\n" + \
+                               "Something went wrong estimating the transform; most likely, more sources are needed.")
+
+                    ind_bsub = np.nonzero(cens_match @ np.ones(len(cens_ref)))
+                    ind_ref = np.nonzero(np.ones(len(cens_bsub)) @ cens_match)
+
+                    flux_ratios = flux_bsub[ind_bsub] / flux_ref[ind_ref]
+
+                    scaling = np.median(flux_ratios)
+                    scaling_mad = np.mean(np.abs(flux_ratios - np.mean(scaling)))
+
+                    printf(f"Flux scaling: {scaling} +/- {scaling_mad}")
+
+                    img_bsub, _ = aa.apply_transform(xform, img_bsub, ref_frame)
+                    img_bsub *= scaling
+
+                printf("Aligned frame included in final data cube.")
+                final_frames.append(img_bsub)
+
+                fname_old = file_list[i]
+                fname = fname_old[:fname_old.rfind(".")] + "_aligned.fit"
+
+                fname_output = input(f"Save aligned and background-subtracted band frame to (path) [{fname}]: ")
+                fname_output = fname_output.strip()
+                if fname_output != "":
+                    fname = fname_output
+
+                fits.writeto(fname, img_bsub, overwrite=True)
+
+                break
+
+            elif search_option == 1:
+                break
+
+            elif search_option == 2:
+
+                # update
+                thresh_nsigma = prompt(f"Number of sigma (={bstd:.3f}) above background level for source detection",
+                                       "thresh_nsigma", float)
+                fwhm = prompt("FWHM of sources (pixels, float): ", "fwhm", float)
+                roundlim = abs(
+                    prompt("Upper bound on absolute roundness for sources (float): ", "roundlim", float))
+                sharplo = abs(
+                    prompt("Lower bound on sharpness for sources (float): ", "sharplo", float))
+
+                update_default("thresh_nsigma", thresh_nsigma)
+                update_default("fwhm", fwhm)
+                update_default("roundlim", roundlim)
+
+            else:
+                printf("Invalid selection")
+                save_and_quit(40)
+
+        i += 1
+
+    if len(final_frames) == 0:
+        printf("No frames selected to align and combine.")
+        save_and_quit(30)
+
+    printf(f"Combining {len(final_frames)} frames.")
 
     combine_mode = prompt_choices(
         "How to combine frames (num)?",
         """
         (1) Median
         (2) Mean
-        """, "flat_combine", int)
+        """, "total_combine", int)
 
     if combine_mode == COMBINE_MEDIAN:
-        img = np.median(imgs_align, axis=0)
+        img = np.median(final_frames, axis=0)
     elif combine_mode == COMBINE_MEAN:
-        img = np.mean(imgs_align, axis=0)
+        img = np.mean(final_frames, axis=0)
     else:
         printf("Invalid frame combination mode")
-        exit(10)
+        save_and_quit(10)
 
-    plot_frame(img)
-    plt.waitforbuttonpress()
+    plot_frame(img, sigma=5.0)
+    plt.show()
 
-    out_fname = prompt(f"Output file for combined {band} image (path)?", "fout")
+    out_fname = prompt(f"Output file for total intensity image (path)?", "align_fout")
     if out_fname != "":
         out_file = root_dir + "/" + out_fname
         fits.writeto(out_file, img, overwrite=True)
-
-    printf(f"Combined {band} image saved.")
+        printf(f"Total intensity image saved.")
 
     return img

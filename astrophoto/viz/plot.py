@@ -15,5 +15,4 @@ def plot_frame(frame, title: str=None, sigma:float=1.0):
     if title is not None:
         ax.set_title(title)
 
-    # plt.show(block=False)
     return ax
