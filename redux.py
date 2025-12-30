@@ -10,7 +10,7 @@ procedures = [
         "bias",
         "dark",
         "flat",
-        "image",
+        "calib",
         "stack"
     ]
 
@@ -40,7 +40,7 @@ if __name__ == "__main__":
         calib_dark(root_dir)
     elif proc == "flat":
         calib_flat(root_dir)
-    elif proc == "image":
+    elif proc == "calib":
         calib_image(root_dir)
     elif proc == "stack":
         stack_image(root_dir)

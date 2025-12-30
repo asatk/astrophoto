@@ -20,7 +20,7 @@ from astrophoto.io.reduxio import update_default, get_default, save_and_quit
 from astrophoto.viz import plot_frame
 
 # shift and scale data WITHOUT combining -- frames are returned in the same order but aligned
-def coadd(data_cube, xsh, ysh, skyval=None, starval=None):
+def coadd(data_cube, xsh, ysh):
 
     # reference image index -- doesn't matter since the subtractions/division are all relative
     ind_ref = 0
@@ -45,12 +45,6 @@ def coadd(data_cube, xsh, ysh, skyval=None, starval=None):
     # pad all frames in data cube
     data_pad = np.pad(data_cube, pad, constant_values=np.nan)
 
-    # shift each frame in cube by each's offset
-    # data_roll = np.array([
-    #     np.roll(data_pad[i], (yoff[i], xoff[i]), axis=(0,1))
-    #     for i in range(data_pad.shape[0])
-    # ])
-
     data_roll = np.array([
         shift(data_pad[i], (xoff[i], yoff[i]), mode="constant", cval=np.nan)
         for i in range(data_pad.shape[0])
@@ -64,22 +58,29 @@ def coadd(data_cube, xsh, ysh, skyval=None, starval=None):
 
     data_trim = data_roll[:,ytrimlo:ytrimhi,xtrimlo:xtrimhi]
 
-    # shift and scale counts in each frame by bkgd sky value and star counts
-    if skyval is not None and starval is not None:
-        data_trim -= skyval[:,None,None]
-        starval -= skyval
-
-        starval_norm = np.divide.outer(starval, starval)[ind_ref]
-        data_trim *= starval_norm[:,None,None]
-
     return data_trim
 
 
 
 def calib_image(root_dir):
 
-    file_pattern = root_dir + "/" + prompt("File pattern (glob pattern)", "fpattern")
-    all_file_list = glob.glob(file_pattern)
+    file_options = prompt("Use a stored file list (0) or match files to a pattern (1)", "calib_file_opt", int)
+    if file_options == 0:
+        flist_fname_in = prompt("File containing list of files: ", "calib_flist_in", str)
+        all_file_list = []
+        with open(flist_fname_in, "r") as flist_in:
+            temp_list = flist_in.readlines()
+
+        all_file_list = [s.strip() for s in temp_list]
+
+    elif file_options == 1:
+        file_pattern = root_dir + "/" + prompt("File pattern (glob pattern)", "calib_fpattern")
+        all_file_list = glob.glob(file_pattern)
+    else:
+        printf("Invalid selection.")
+        save_and_quit(20)
+
+
 
     band = prompt("Instrument Filter (str)", "flat_band", str)
 
@@ -157,8 +158,11 @@ def calib_image(root_dir):
     sharplo = get_default("sharplo")
 
     final_frames = []
+    shifts = []
+    final_files = []
     ref_frame = None
 
+    # todo extract sources in each image in parallel
     for i, img in enumerate(imgs):
 
         printf(f"Aligning frame [{i+1}/{len(imgs)}]: {file_list[i]}")
@@ -174,9 +178,7 @@ def calib_image(root_dir):
         # estimate background RMS for threshold val
         _, _, bstd = sigma_clipped_stats(img_bsub, sigma=sclip_sigma)
 
-
-        keep_searching = True
-        while keep_searching:
+        while True:
 
             # initialize instance of star finder object
             finder = DAOStarFinder(threshold=thresh_nsigma * bstd, fwhm=fwhm,
@@ -195,9 +197,9 @@ def calib_image(root_dir):
                 ycen = srcs["ycentroid"]
                 cens = np.array([xcen, ycen]).T
 
-                ax = plot_frame(img_bsub, sigma=5.0)
-                CircularAperture(cens, r=50.0).plot(ax=ax, color="red")
-                plt.show()
+                # ax = plot_frame(img_bsub, sigma=5.0)
+                # CircularAperture(cens, r=50.0).plot(ax=ax, color="red")
+                # plt.show()
 
             else:
                 printf("Insufficient number of sources (< 3) found with the provided finder parameters.")
@@ -210,21 +212,39 @@ def calib_image(root_dir):
                 (2) Refine source extraction
                 """, "src_ext_decision", int)
 
-            if search_option == 0:
+            if search_option == 0 and srcs is not None and len(srcs) >= 3:
 
                 # set the reference frame
                 if len(final_frames) == 0:
                     ref_frame = img
+                    cens_ref = np.array([srcs["xcentroid"], srcs["ycentroid"]]).T
                 # align subsequent frames to reference frames
                 else:
-                    img, _ = aa.register(img, ref_frame)
 
-                printf("Aligned frame included in final data cube.")
+                    try:
+                        xform, _ = aa.find_transform(cens, cens_ref, max_control_points=100)
+                    except:
+                        printf("No matches between transformed frame and reference frame.\n" + \
+                               "Something went wrong estimating the transform; most likely, more sources are needed.")
+                        continue
+
+
+                    img, _ = aa.apply_transform(xform, img, ref_frame)
+
+
+                    shift_xy = xform.params[1::-1, 2]
+                    shift_xy = np.astype(np.sign(shift_xy) * np.ceil(np.abs(shift_xy)), int)
+                    shifts.append(shift_xy)
+
                 final_frames.append(img)
-                keep_searching = False
+                final_files.append(file_list[i])
+
+                printf(f"Aligned frame included in final data cube [{len(final_frames)} frame(s)].")
+
+                break
 
             elif search_option == 1:
-                keep_searching = False
+                break
 
             elif search_option == 2:
 
@@ -262,8 +282,34 @@ def calib_image(root_dir):
         printf("Invalid frame combination mode")
         save_and_quit(10)
 
+    # trim combined frame based on shifts
+    shifts = np.round(shifts).astype(int).T
+    shiftsx = shifts[0]
+    shiftsy = shifts[1]
+
+    xpadlo = np.max(np.clip(shiftsx, a_min=0, a_max=None))
+    xpadhi = np.min(np.clip(shiftsx, a_min=None, a_max=0))
+
+    ypadlo = np.max(np.clip(shiftsy, a_min=0, a_max=None))
+    ypadhi = np.min(np.clip(shiftsy, a_min=None, a_max=0))
+
+    # trim padding/nan/bad data out of shifted frames
+    xtrimlo = None if xpadlo == 0 else xpadlo
+    xtrimhi = None if xpadhi == 0 else xpadhi
+    ytrimlo = None if ypadlo == 0 else ypadlo
+    ytrimhi = None if ypadhi == 0 else ypadhi
+
+    img = img[xtrimlo:xtrimhi, ytrimlo:ytrimhi]
+
     plot_frame(img, sigma=5.0)
     plt.show()
+
+    flist_fname_out = prompt("Output file for list of files selected in the final stack: ", "calib_flist_out", str)
+    if flist_fname_out != "":
+        with open(flist_fname_out, "w") as flist_out:
+            for f in final_files:
+                flist_out.write(f + "\n")
+        printf("File list saved.")
 
     out_fname = prompt(f"Output file for combined {band} image (path)?", "calib_fout")
     if out_fname != "":
@@ -307,6 +353,7 @@ def stack_image(root_dir):
     sharplo = get_default("sharplo")
 
     final_frames = []
+    shifts = []
     ref_frame = None
 
     i = 0
@@ -398,6 +445,9 @@ def stack_image(root_dir):
                     xform, _ = aa.find_transform(cens_bsub, cens_ref, max_control_points=100)
                     cens_xform = skimage.transform.matrix_transform(cens_bsub, xform)
 
+                    shift_xy = np.astype(xform.params[:2, 2], int)
+                    shifts.append(shift_xy)
+
                     # half-pixel uncertainty should be good enough to confirm that two pairs of coordinates
                     # refer to the same soure
                     unc_px = 0.5
@@ -409,6 +459,7 @@ def stack_image(root_dir):
                     if nmatches < 1:
                         printf("No matches between transformed frame and reference frame.\n" + \
                                "Something went wrong estimating the transform; most likely, more sources are needed.")
+                        continue
 
                     ind_bsub = np.nonzero(cens_match @ np.ones(len(cens_ref)))
                     ind_ref = np.nonzero(np.ones(len(cens_bsub)) @ cens_match)
@@ -482,6 +533,23 @@ def stack_image(root_dir):
     else:
         printf("Invalid frame combination mode")
         save_and_quit(10)
+
+    # trim combined frame based on shifts
+    shifts = np.round(shifts).astype(int).T
+    shiftsx = shifts[0]
+    shiftsy = shifts[1]
+
+    xpadlo = np.max(np.clip(shiftsx, a_min=0, a_max=None))
+    xpadhi = np.min(np.clip(shiftsx, a_min=None, a_max=0))
+
+    ypadlo = np.max(np.clip(shiftsy, a_min=0, a_max=None))
+    ypadhi = np.min(np.clip(shiftsy, a_min=None, a_max=0))
+
+    # trim padding/nan/bad data out of shifted frames
+    xtrimlo = None if xpadlo == 0 else xpadlo
+    xtrimhi = None if xpadhi == 0 else xpadhi
+    ytrimlo = None if ypadlo == 0 else ypadlo
+    ytrimhi = None if ypadhi == 0 else ypadhi
 
     plot_frame(img, sigma=5.0)
     plt.show()
