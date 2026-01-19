@@ -3,6 +3,7 @@ import glob
 import numpy as np
 from astropy.io import fits
 
+from astrophoto.core import combine
 from astrophoto.io import printf, println, prompt, COMBINE_MEDIAN, prompt_choices, COMBINE_MEAN
 from astrophoto.io.reduxio import save_and_quit
 from astrophoto.viz import plot_frame
@@ -43,20 +44,7 @@ def calib_dark(root_dir):
         darks -= bias
         darks /= texps[..., None, None]
 
-    combine_mode = prompt_choices(
-        "How to combine frames (num)?",
-        """
-        (1) Median
-        (2) Mean
-        """, "dark_combine", int)
-
-    if combine_mode == COMBINE_MEDIAN:
-        dark = np.median(darks, axis=0)
-    elif combine_mode == COMBINE_MEAN:
-        dark = np.mean(darks, axis=0)
-    else:
-        printf("Invalid frame combination mode")
-        save_and_quit(10)
+    dark = combine(darks)
 
     plot_frame(dark)
 

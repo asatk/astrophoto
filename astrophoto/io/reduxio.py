@@ -1,21 +1,8 @@
 import argparse as ap
+from astropy.io import fits
+import glob
 import json
-
-COMBINE_MEDIAN = 1
-COMBINE_MEAN = 2
-
-defaults = {
-    "root": ".",
-    "fpattern": "*.fit",
-
-    "bias_fout": "bias.fits",
-    "bias_combine": COMBINE_MEDIAN,
-
-    "dark_fout": "dark.fits",
-    "dark_texp": 0.0,
-    "dark_combine": COMBINE_MEDIAN,
-    "dark_is_current": 0,
-}
+import numpy as np
 
 is_quiet = False
 
@@ -117,3 +104,13 @@ def prompt_choices(msg: str, choices: str, key: str, cast_fn=str):
     return resp
 
 
+def load_files(root_dir: str):
+    # save inputs for later
+    file_pattern = root_dir + "/" + prompt("File pattern (glob pattern)", "fpattern")
+    file_list = glob.glob(file_pattern)
+
+    data_list = []
+    for f in file_list:
+        data_list.append(fits.getdata(f).astype(np.float64))
+
+    return data_list

@@ -1,10 +1,10 @@
 from astrophoto.image import calib_image
 from astrophoto.image.image import stack_image
-from astrophoto.io import println, prompt, init_parser, init_defaults, store_defaults, set_quiet
+from astrophoto.io import println, prompt, init_parser, init_defaults, set_quiet
 from astrophoto.bias import calib_bias
 from astrophoto.dark import calib_dark
 from astrophoto.flat import calib_flat
-from astrophoto.io.reduxio import save_and_quit
+from astrophoto.io.reduxio import save_and_quit, printf
 
 procedures = [
         "bias",
@@ -44,6 +44,9 @@ if __name__ == "__main__":
         calib_image(root_dir)
     elif proc == "stack":
         stack_image(root_dir)
+    else:
+        printf("Invalid procedure.")
+        save_and_quit(50)
 
     println()
 

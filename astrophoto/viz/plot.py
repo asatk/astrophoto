@@ -1,11 +1,11 @@
 from matplotlib import pyplot as plt
 import numpy as np
 
-def plot_frame(frame, title: str=None, sigma:float=1.0):
+def plot_frame(frame: np.ndarray, title: str=None, sigma:float=1.0, show: bool=False):
     med = np.median(frame)
     mad = np.median(np.abs(frame - med))
-    vmin = med - sigma*mad
-    vmax = med + sigma*mad
+    vmin = med - sigma * mad
+    vmax = med + sigma * mad
 
     fig, ax = plt.subplots()
 
@@ -14,5 +14,8 @@ def plot_frame(frame, title: str=None, sigma:float=1.0):
 
     if title is not None:
         ax.set_title(title)
+
+    if show:
+        plt.show()
 
     return ax
